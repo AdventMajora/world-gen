@@ -1,0 +1,475 @@
+<!DOCTYPE HTML>
+<html>
+	<style>
+		@font-face {
+			font-family: visitor;
+			src: url("assets/visitor1.ttf");
+		}
+	</style>
+	<body bgcolor="#787878" onresize="manageScreen()">
+	<div>
+		<div style="position:absolute">
+			<canvas id="render_canvas" height="160" width="160" style="border:1px solid black; image-rendering: pixelated;"></canvas>
+		</div>
+	</div>
+</html>
+<script>
+	var map = [];
+	var canvas_height;
+	var canvas_width
+	var scale_factor;
+	var tile_size;
+	var gen_iterations = 10; //consider changing this to a condition based end
+	
+	var mountain_seeds = 8;
+	var new_mountain_chance = 20;
+	var mountain_elev_chance = 20;
+	var mountain_effect_chance = 20;
+	
+	//water is the default tile and the whole map is initialized -1, thatn apply water at elevation 0
+	//all tiles have an associated elevation to them. 0 is water level.
+	
+	//tile types:
+	//-1: uninitialized
+	//0: water
+	//0.5: shallow water
+	//1: mountain
+	//2: plains
+	//3: forest
+	//4: beach/bank
+	//5: desert
+	
+	//inititate render canvas
+	var render_canvas = document.getElementById("render_canvas");
+	var rctx = render_canvas.getContext("2d");
+	
+	//initiate the map
+	function init_map (size) {
+		tile_size = canvas_height/size;
+		for (var y = 0; y < size; y++) {
+			var new_column = [];
+			for (var x = 0; x < size; x++) {
+				new_column.push({
+					type: -1,
+					wave: 0,
+					elevation: -5
+				});
+			}
+			map.push(new_column);
+		}
+	}
+	
+	function gen_world() {
+		//start with mountain peaks. roll for placement.
+		var num_mount_seeds = (Math.random()*mountain_seeds)+Math.floor(map.length/8)
+		
+		//get list of valid spots
+		var valid_spots = [];
+		for (var y=0; y<map.length; y++) {
+			for (var x=0; x<map[0].length; x++) {
+				if (map[y][x].type == -1) {
+					valid_spots.push({
+						x: x,
+						y: y 
+					});
+				}
+			}
+		}
+		
+		console.log(valid_spots.length)
+		
+		for (var i=0; i<num_mount_seeds; i++) {
+			var rand = Math.floor(Math.random()*valid_spots.length);	//pick a random valid spot
+			map[valid_spots[rand].y][valid_spots[rand].x].type = 1;	//set the spot to mountain
+			valid_spots.splice(rand,1);	//remove the spot from the availabe list
+		}
+
+		
+		
+		gen_mountains(32);
+		
+		gen_water();
+		
+		gen_beach();
+		
+		gen_plains()
+	}
+	
+	function gen_beach() {
+		//grab all the tiles in the beach range
+		for (var y=0; y<map.length; y++) {
+			for (var x=0; x<map[0].length; x++) {
+				if (map[y][x].type == 1 && (map[y][x].elevation >=1 && map[y][x].elevation <5)) {
+					
+					// is it adjacent to water?
+					var adjacent_water = false;
+					//cycle up left right down
+					for (var dir = 0; dir<4; dir++) {
+						//tile we're looking for
+						var target_tile = {	
+							x: x,
+							y: y
+						};
+						
+						//point target to which direction we're looking
+						switch (dir) {
+							case 0:	//tile up
+									if (y == 0) {//if at top, wrap to bottom
+										target_tile.y = map.length-1;
+									} else { //else just look up by one
+										target_tile.y = target_tile.y-1; 
+									}
+									break;
+							case 1:	//tile left
+									if (x == 0) {//if at left edge, wrap to right
+										target_tile.x = map.length-1;
+									} else { //else just look left by one
+										target_tile.x = target_tile.x-1; 
+									}
+									break;
+							case 2:	//tile down
+									if (y == map.length-1) {//if at bottom, wrap to top
+										target_tile.y = 0;
+									} else { //else just look down by one
+										target_tile.y = target_tile.y+1; 
+									}
+									break;
+							case 3:	//tile right
+									if (x == map.length-1) {//if at right edge, wrap to left
+										target_tile.x = 0;
+									} else { //else just look right by one
+										target_tile.x = target_tile.x+1; 
+									}
+									break;
+						}
+						
+						if (map[target_tile.y][target_tile.x].type == 0 || map[target_tile.y][target_tile.x].type == 0.5) {
+							adjacent_water = true;
+						}
+					}
+					
+					if (adjacent_water == true) {
+						map[y][x].type = 4;
+					}
+				}
+			}
+		}
+	}
+	
+	function gen_plains() {
+		//grab all the tiles in the plains range
+		for (var y=0; y<map.length; y++) {
+			for (var x=0; x<map[0].length; x++) {
+				if (map[y][x].type == 1 && (map[y][x].elevation >=2 && map[y][x].elevation <14)) {
+					map[y][x].type = 2;
+				}
+			}
+		}
+	}
+	
+	function gen_water() {
+		
+		//set all null tiles to water
+		for (var y=0; y<map.length; y++) {
+			for (var x=0; x<map[0].length; x++) {
+				if (map[y][x].type == -1) {
+					map[y][x].type = 0
+				}
+			}
+		}
+		
+		
+		while (get_shallow_tiles().length !=0) {
+		//for (var i=0; i<24;i++) {
+			var low_tiles = get_shallow_tiles();
+			console.log("shallow tiles: "+low_tiles.length);
+			
+			//go through the low tiles, and see if any are adjacent to a water tile
+			//if they are, set the low tile to water
+			
+			for (l=0; l<low_tiles.length; l++) {
+				var adjacent_water = false;
+				//cycle up left right down
+				for (var dir = 0; dir<4; dir++) {
+					//tile we're looking for
+					var target_tile = {	
+						x: low_tiles[l].x,
+						y: low_tiles[l].y
+					};
+					
+					//point target to which direction we're looking
+					switch (dir) {
+						case 0:	//tile up
+								if (low_tiles[l].y == 0) {//if at top, wrap to bottom
+									target_tile.y = map.length-1;
+								} else { //else just look up by one
+									target_tile.y = target_tile.y-1; 
+								}
+								break;
+						case 1:	//tile left
+								if (low_tiles[l].x == 0) {//if at left edge, wrap to right
+									target_tile.x = map.length-1;
+								} else { //else just look left by one
+									target_tile.x = target_tile.x-1; 
+								}
+								break;
+						case 2:	//tile down
+								if (low_tiles[l].y == map.length-1) {//if at bottom, wrap to top
+									target_tile.y = 0;
+								} else { //else just look down by one
+									target_tile.y = target_tile.y+1; 
+								}
+								break;
+						case 3:	//tile right
+								if (low_tiles[l].x == map.length-1) {//if at right edge, wrap to left
+									target_tile.x = 0;
+								} else { //else just look right by one
+									target_tile.x = target_tile.x+1; 
+								}
+								break;
+					}
+					
+					if (map[target_tile.y][target_tile.x].type == 0 || map[target_tile.y][target_tile.x].type == 0.5) {
+						adjacent_water = true;
+					}
+				}
+			
+				if (adjacent_water == true) {
+					if (map[low_tiles[l].y][low_tiles[l].x].elevation >=-1) {
+						map[low_tiles[l].y][low_tiles[l].x].type = 0.5;
+					} else {
+						map[low_tiles[l].y][low_tiles[l].x].type = 0;
+					}
+				}
+			}
+			
+		}
+		
+		
+		//return a list of non water tiles with elevation <=0
+		function get_shallow_tiles() {
+			var low_tiles = [];
+			for (var y=0; y<map.length; y++) {
+				for (var x=0; x<map[0].length; x++) {
+					if (map[y][x].type >= 1 && map[y][x].elevation <=0) {
+						low_tiles.push({
+							x: x,
+							y: y
+						});
+					}
+				}
+			}
+			
+			for (l=0; l<low_tiles.length; l++) {
+				var adjacent_water = false;
+				//cycle up left right down
+				for (var dir = 0; dir<4; dir++) {
+					//tile we're looking for
+					var target_tile = {	
+						x: low_tiles[l].x,
+						y: low_tiles[l].y
+					};
+					
+					//point target to which direction we're looking
+					switch (dir) {
+						case 0:	//tile up
+								if (low_tiles[l].y == 0) {//if at top, wrap to bottom
+									target_tile.y = map.length-1;
+								} else { //else just look up by one
+									target_tile.y = target_tile.y-1; 
+								}
+								break;
+						case 1:	//tile left
+								if (low_tiles[l].x == 0) {//if at left edge, wrap to right
+									target_tile.x = map.length-1;
+								} else { //else just look left by one
+									target_tile.x = target_tile.x-1; 
+								}
+								break;
+						case 2:	//tile down
+								if (low_tiles[l].y == map.length-1) {//if at bottom, wrap to top
+									target_tile.y = 0;
+								} else { //else just look down by one
+									target_tile.y = target_tile.y+1; 
+								}
+								break;
+						case 3:	//tile right
+								if (low_tiles[l].x == map.length-1) {//if at right edge, wrap to left
+									target_tile.x = 0;
+								} else { //else just look right by one
+									target_tile.x = target_tile.x+1; 
+								}
+								break;
+					}
+					
+					if (map[target_tile.y][target_tile.x].type == 0 || map[target_tile.y][target_tile.x].type == 0.5) {
+						adjacent_water = true;
+					}
+				}
+				
+				if (adjacent_water == false) {
+					low_tiles.splice(l,1);
+					l--;
+				}
+			}
+			
+			return low_tiles;
+		}
+	}
+	
+	function gen_mountains(end_elev) {	//generates the maps mountain range(s)
+		//for (var i=0; i<gen_iterations; i++) {
+		while (check_mountains(end_elev) == false) {
+			//gen mountains
+			//get all the existing mountain tiles
+			var mountain_tiles = [];
+			for (var y=0; y<map.length; y++) {
+				for (var x=0; x<map[0].length; x++) {
+					if (map[y][x].type == 1) {
+						mountain_tiles.push({
+							x: x,
+							y: y 
+						});
+					}
+				}
+			}
+			
+			//for each mountain tile...
+			for (var m = 0; m<mountain_tiles.length; m++) {
+				//search the spots around it. If it's empty roll to add a mountain at -5
+				//if it's a mountain, roll to increase the elevation. Otherwise, leave it be
+				
+				//cycle up left right down
+				for (var dir = 0; dir<4; dir++) {
+					//tile we're looking at changing; default to curren tile
+					var target_tile = {	
+						x: mountain_tiles[m].x,
+						y: mountain_tiles[m].y
+					};
+					
+					//point target to which direction we're looking
+					switch (dir) {
+						case 0:	//tile up
+								if (mountain_tiles[m].y == 0) {//if at top, wrap to bottom
+									target_tile.y = map.length-1;
+								} else { //else just look up by one
+									target_tile.y = target_tile.y-1; 
+								}
+								break;
+						case 1:	//tile left
+								if (mountain_tiles[m].x == 0) {//if at left edge, wrap to right
+									target_tile.x = map.length-1;
+								} else { //else just look left by one
+									target_tile.x = target_tile.x-1; 
+								}
+								break;
+						case 2:	//tile down
+								if (mountain_tiles[m].y == map.length-1) {//if at bottom, wrap to top
+									target_tile.y = 0;
+								} else { //else just look down by one
+									target_tile.y = target_tile.y+1; 
+								}
+								break;
+						case 3:	//tile right
+								if (mountain_tiles[m].x == map.length-1) {//if at right edge, wrap to left
+									target_tile.x = 0;
+								} else { //else just look right by one
+									target_tile.x = target_tile.x+1; 
+								}
+								break;
+					}
+					
+					//roll to make changes
+					if (Math.random()*100 <= mountain_effect_chance) {
+						//roll for changes to target tile
+						if (map[target_tile.y][target_tile.x].type == -1) {	//if empty, roll to make it a mountain
+							if (Math.random()*100 <= new_mountain_chance) {
+								map[target_tile.y][target_tile.x].type = 1;
+								map[target_tile.y][target_tile.x].elevation = -5;
+								//map[mountain_tiles[m].y][mountain_tiles[m].x].elevation++;
+							}
+						}
+						
+						if (map[target_tile.y][target_tile.x].type == 1) {	//if mountain, roll to bump elevation
+							if (Math.random()*100 <= mountain_elev_chance) {
+								map[target_tile.y][target_tile.x].elevation++
+								//map[mountain_tiles[m].y][mountain_tiles[m].x].elevation++;
+							}
+						}	
+					}
+				}
+			}	
+		}
+	}
+	
+	//looks through all mountain tiles, and checks if w've hit an elevation of elev for at least one
+	function check_mountains(elev) {	
+		//get all the existing mountain tiles
+		var mountain_tiles = [];
+		for (var y=0; y<map.length; y++) {
+			for (var x=0; x<map[0].length; x++) {
+				if (map[y][x].type == 1) {
+					mountain_tiles.push(map[y][x].elevation);
+				}
+			}
+		}
+		
+		var hit_five = false;
+		for (var m=0; m<mountain_tiles.length; m++) {
+			if (mountain_tiles[m] >= elev) {
+				hit_five = true;
+			}
+		}
+		
+		return hit_five
+	}
+	
+	function render_map() {	//render the map
+		for (var y = 0; y < map.length; y++) {
+			for (var x = 0; x < map[0].length; x++) {
+			
+				switch (map[y][x].type) {
+					case -1:	rctx.fillStyle= "#1A1A1A";
+								break;
+					case	0:	rctx.fillStyle ="#0078F8"; 
+								break;
+					case  0.5:	rctx.fillStyle ="#3CBCFC"; 
+								break;
+					case	1:	rctx.fillStyle ="rgb("+(108+(5*(map[y][x].elevation)))+","+(108+(5*(map[y][x].elevation)))+","+(108+(5*(map[y][x].elevation)))+")"; 
+								break;
+					case	2:	rctx.fillStyle ="rgb("+(0+(5*(map[y][x].elevation)))+","+(168+(5*(map[y][x].elevation)))+","+(68+(5*(map[y][x].elevation)))+")"; 
+								break;
+					case 	4:	rctx.fillStyle ="#F0D0B0"; 
+								break;
+				}
+			
+				rctx.fillRect(x*tile_size,y*tile_size,tile_size,tile_size);
+				//rctx.fillStyle = "white";
+				//rctx.fillText(map[y][x].elevation,x*tile_size,y*tile_size+8);
+			}
+		}
+	}
+	
+	function manageScreen() {	//game window management
+		if (window.innerWidth < window.innerHeight) {
+			canvas_width = window.innerWidth;
+			canvas_height = Math.floor((160/160)*(window.innerWidth));	
+		} else {
+			canvas_height = window.innerHeight;
+			canvas_width = Math.floor((160/160)*(window.innerHeight));
+		}
+		render_canvas.style.top = JSON.stringify((window.innerHeight/2)-(canvas_height/2))+'px';
+		render_canvas.style.left = JSON.stringify((window.innerWidth/2)-(canvas_width/2))+'px';
+		render_canvas.height = JSON.stringify(canvas_height);
+		render_canvas.width = JSON.stringify(canvas_width);
+		render_canvas.style.position = 'absolute';
+		rctx.imageSmoothingEnabled = false;
+		scale_factor = (canvas_width/160);
+	}	
+	
+	manageScreen();
+	init_map(80);
+	gen_world();
+	render_map();
+	
+</script>
